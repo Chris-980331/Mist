@@ -51,105 +51,104 @@
     </div>
 
     <script>
-        const canvas = document.getElementById('fogCanvas');
-        const ctx = canvas.getContext('2d');
-        let width, height;
-        let isDrawing = false;
-        let lastX = 0; let lastY = 0;
-        let hasFogged = false; // 标记是否已经起雾
+                            const canvas = document.getElementById('fogCanvas');
+const ctx = canvas.getContext('2d');
+let width, height;
+let isDrawing = false;
+let lastX = 0; let lastY = 0;
+let hasFogged = false;
 
-        // --- 3. 升级版水滴粒子系统 ---
-        let droplets = [];
+// --- 核心优化：水分累积与停顿检测 ---
+let dwellTimer = 0;      // 停留计数器
+const DWELL_THRESHOLD = 15; // 触发水滴的停留阈值（帧数）
+let droplets = [];
 
-        class Droplet {
-            constructor(x, y) {
-                this.x = x;
-                this.y = y;
-                // 水滴半径：1.5 到 4 之间，比之前小一点，更精致
-                this.radius = Math.random() * 2.5 + 1.5;
-                // 核心物理优化：速度与半径成正比。大水滴重，流得快。
-                this.speedY = this.radius * 0.5 + Math.random() * 0.5;
-                // 增加一个水平微扰速度，让它蜿蜒下落
-                this.speedX = (Math.random() - 0.5) * 0.5;
-            }
-            update() {
-                // 施加重力加速
-                this.speedY += 0.03;
-                // 施加随机的水平摆动，模拟水流过不平整表面的感觉
-                this.speedX += (Math.random() - 0.5) * 0.2;
-                // 抑制过大的水平速度
-                this.speedX *= 0.9;
-
-                this.y += this.speedY;
-                this.x += this.speedX;
-            }
+class Droplet {
+    constructor(x, y, radius) {
+        this.x = x;
+        this.y = y;
+        this.radius = radius || (Math.random() * 2 + 1.5);
+        // 【优化】下落速度调得极慢
+        this.speedY = 0.2 + Math.random() * 0.3;
+        this.friction = 0.98; // 模拟玻璃表面的摩擦力
+        this.wiggle = 0;
+    }
+    update() {
+        // 【优化】模拟表面张力导致的非匀速下滑
+        if (Math.random() > 0.9) {
+            this.wiggle = (Math.random() - 0.5) * 0.3; // 产生细微的左右偏移
         }
 
-        function initCanvas() {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-            // 初始化时不绘制雾气，等哈气触发
+        // 极小的重力影响
+        this.speedY += 0.005;
+        this.y += this.speedY;
+        this.x += this.wiggle;
+    }
+}
+
+function initCanvas() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+}
+
+function fillFog() {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(230, 235, 240, 0.9)';
+    ctx.fillRect(0, 0, width, height);
+    canvas.style.opacity = 1;
+    hasFogged = true;
+    animate();
+}
+
+// 擦除与停顿检测逻辑
+function wipe(x, y) {
+    if (!hasFogged) return;
+
+    // 计算移动距离
+    const dist = Math.sqrt(Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2));
+
+    // 【核心优化】如果移动距离小于 2 像素，视为“停顿”
+    if (dist < 2) {
+        dwellTimer++;
+        if (dwellTimer > DWELL_THRESHOLD) {
+            // 在停顿位置产生一个稍大的水滴
+            droplets.push(new Droplet(x, y, 3 + Math.random() * 2));
+            dwellTimer = 0; // 产生后重置，防止连续喷涌
         }
+    } else {
+        dwellTimer = 0; // 只要开始快速移动，就重置计数器
+    }
 
-        // 绘制满屏雾气的函数（触发后调用一次）
-        function fillFog() {
-            ctx.globalCompositeOperation = 'source-over';
-            // 雾气颜色调得更冷、更透明一点，增加真实感
-            ctx.fillStyle = 'rgba(220, 230, 235, 0.88)';
-            ctx.fillRect(0, 0, width, height);
-            canvas.style.opacity = 1; // CSS动画让画布显现
-            hasFogged = true;
-            animateDroplets(); // 雾气出现后，才开始允许水滴掉落
-        }
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.lineWidth = 14; // 线条细化
+    ctx.shadowBlur = 6; ctx.shadowColor = 'black';
 
-        // --- 2. 优化书写笔触（更细）---
-        function wipe(x, y) {
-            if (!hasFogged) return; // 没起雾不能写字
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
 
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            // 【优化点】线条变细：从 40 改为 12
-            ctx.lineWidth = 22;
-            // 【优化点】边缘羽化变小：配合细线条，让边缘更清晰一点
-            ctx.shadowBlur = 8;
-            ctx.shadowColor = 'black';
+    lastX = x; lastY = y;
+}
 
-            ctx.beginPath();
-            ctx.moveTo(lastX, lastY);
-            ctx.lineTo(x, y);
-            ctx.stroke();
+function animate() {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.shadowBlur = 2;
 
-            lastX = x;
-            lastY = y;
+    for (let i = droplets.length - 1; i >= 0; i--) {
+        const drop = droplets[i];
+        drop.update();
 
-            // 生成水滴的概率（划线越快生成越多）
-            if (Math.random() > 0.92) {
-                droplets.push(new Droplet(x, y));
-            }
-        }
+        ctx.beginPath();
+        // 绘制更真实的长椭圆形水滴头
+        ctx.ellipse(drop.x, drop.y, drop.radius * 0.8, drop.radius * 1.2, 0, 0, Math.PI * 2);
+        ctx.fill();
 
-        // 水滴动画循环
-        function animateDroplets() {
-            ctx.globalCompositeOperation = 'destination-out';
-            // 水滴本身的擦除边缘要稍微硬一点
-            ctx.shadowBlur = 3;
-
-            for (let i = droplets.length - 1; i >= 0; i--) {
-                const drop = droplets[i];
-                drop.update();
-
-                // 绘制水滴轨迹（擦除雾气）
-                ctx.beginPath();
-                // 用圆形模拟水滴头部
-                ctx.arc(drop.x, drop.y, drop.radius, 0, Math.PI*2);
-                ctx.fill();
-
-                if (drop.y > height + 50) droplets.splice(i, 1);
-            }
-            requestAnimationFrame(animateDroplets);
-        }
-
+        if (drop.y > height + 20) droplets.splice(i, 1);
+    }
+    requestAnimationFrame(animate);
+}
         // --- 1. 哈气音频检测 ---
         async function startAudioDetection() {
             try {
