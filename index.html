@@ -3,37 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>拟真哈气起雾窗户</title>
+    <title>拟真哈气起雾窗户 - 修正版</title>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: sans-serif; }
-
-        /* 背景图：找了一张更有氛围感的雨窗图 */
         #background {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: url('https://images.unsplash.com/photo-1493514789931-586cb221d7a7?q=80&w=2000') no-repeat center center;
-            background-size: cover;
-            z-index: 1;
+            background-size: cover; z-index: 1;
         }
-
-        /* 雾气画布 */
         #fogCanvas {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 2;
-            /* 稍微降低一点整体模糊度，让细线条更清晰 */
-            filter: blur(1px);
-            opacity: 0; /* 初始状态是透明的（没起雾） */
-            transition: opacity 1.5s ease-in-out; /* 起雾时的渐变过渡 */
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 2; filter: blur(1px); opacity: 0;
+            transition: opacity 1.5s ease-in-out;
         }
-
-        /* 启动遮罩层 */
         #startScreen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.7); z-index: 10;
             display: flex; justify-content: center; align-items: center; color: white; flex-direction: column;
         }
-        #startScreen h1 { margin-bottom: 20px; }
         #startBtn {
             padding: 15px 30px; border: 1px solid white; cursor: pointer;
             background: rgba(255,255,255,0.2); border-radius: 30px;
@@ -41,115 +28,102 @@
     </style>
 </head>
 <body>
-
     <div id="background"></div>
     <canvas id="fogCanvas"></canvas>
-
     <div id="startScreen">
         <h1>准备好了吗？</h1>
         <div id="startBtn">点击开启交互，然后对着麦克风哈气</div>
     </div>
 
     <script>
-                            const canvas = document.getElementById('fogCanvas');
-const ctx = canvas.getContext('2d');
-let width, height;
-let isDrawing = false;
-let lastX = 0; let lastY = 0;
-let hasFogged = false;
+        const canvas = document.getElementById('fogCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let isDrawing = false;
+        let lastX = 0; let lastY = 0;
+        let hasFogged = false;
+        let dwellTimer = 0;
+        const DWELL_THRESHOLD = 8;
+        let droplets = [];
 
-// --- 核心优化：水分累积与停顿检测 ---
-let dwellTimer = 0;      // 停留计数器
-const DWELL_THRESHOLD = 15; // 触发水滴的停留阈值（帧数）
-let droplets = [];
-
-class Droplet {
-    constructor(x, y, radius) {
-        this.x = x;
-        this.y = y;
-        this.radius = radius || (Math.random() * 2 + 1.5);
-        // 【优化】下落速度调得极慢
-        this.speedY = 0.2 + Math.random() * 0.3;
-        this.friction = 0.98; // 模拟玻璃表面的摩擦力
-        this.wiggle = 0;
-    }
-    update() {
-        // 【优化】模拟表面张力导致的非匀速下滑
-        if (Math.random() > 0.9) {
-            this.wiggle = (Math.random() - 0.5) * 0.3; // 产生细微的左右偏移
+        class Droplet {
+            constructor(x, y, radius) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius || (Math.random() * 3 + 4);
+                this.speedY = 0.05 + Math.random() * 0.1;
+                this.gravity = 0.002;
+                this.wiggle = 0;
+            }
+            update() {
+                if (Math.random() > 0.8) {
+                    this.wiggle = (Math.random() - 0.5) * 0.2;
+                }
+                this.speedY += this.gravity;
+                this.y += this.speedY;
+                this.x += this.wiggle;
+            }
         }
 
-        // 极小的重力影响
-        this.speedY += 0.005;
-        this.y += this.speedY;
-        this.x += this.wiggle;
-    }
-}
-
-function initCanvas() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
-}
-
-function fillFog() {
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(230, 235, 240, 0.9)';
-    ctx.fillRect(0, 0, width, height);
-    canvas.style.opacity = 1;
-    hasFogged = true;
-    animate();
-}
-
-// 擦除与停顿检测逻辑
-function wipe(x, y) {
-    if (!hasFogged) return;
-
-    // 计算移动距离
-    const dist = Math.sqrt(Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2));
-
-    // 【核心优化】如果移动距离小于 2 像素，视为“停顿”
-    if (dist < 2) {
-        dwellTimer++;
-        if (dwellTimer > DWELL_THRESHOLD) {
-            // 在停顿位置产生一个稍大的水滴
-            droplets.push(new Droplet(x, y, 3 + Math.random() * 2));
-            dwellTimer = 0; // 产生后重置，防止连续喷涌
+        function initCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
         }
-    } else {
-        dwellTimer = 0; // 只要开始快速移动，就重置计数器
-    }
 
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.lineWidth = 14; // 线条细化
-    ctx.shadowBlur = 6; ctx.shadowColor = 'black';
+        // --- 核心补丁：起雾函数 ---
+        function fillFog() {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = 'rgba(230, 235, 240, 0.9)';
+            ctx.fillRect(0, 0, width, height);
+            canvas.style.opacity = 1;
+            hasFogged = true;
+            animate(); // 启动动画循环
+        }
 
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+        function wipe(x, y) {
+            if (!hasFogged) return;
+            const dist = Math.sqrt(Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2));
 
-    lastX = x; lastY = y;
-}
+            if (dist < 5) {
+                dwellTimer++;
+                if (dwellTimer > DWELL_THRESHOLD) {
+                    const startRadius = 8 + Math.random() * 5;
+                    droplets.push(new Droplet(x, y, startRadius * 0.6));
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(x, y, startRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    dwellTimer = 0;
+                }
+            } else {
+                dwellTimer = 0;
+            }
 
-function animate() {
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.shadowBlur = 2;
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.lineWidth = 16;
+            ctx.shadowBlur = 10; ctx.shadowColor = 'black';
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            lastX = x; lastY = y;
+        }
 
-    for (let i = droplets.length - 1; i >= 0; i--) {
-        const drop = droplets[i];
-        drop.update();
+        function animate() {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.shadowBlur = 4;
+            for (let i = droplets.length - 1; i >= 0; i--) {
+                const drop = droplets[i];
+                drop.update();
+                ctx.beginPath();
+                ctx.ellipse(drop.x, drop.y, drop.radius * 0.9, drop.radius * 1.1, 0, 0, Math.PI * 2);
+                ctx.fill();
+                if (drop.y > height + 20) droplets.splice(i, 1);
+            }
+            requestAnimationFrame(animate);
+        }
 
-        ctx.beginPath();
-        // 绘制更真实的长椭圆形水滴头
-        ctx.ellipse(drop.x, drop.y, drop.radius * 0.8, drop.radius * 1.2, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (drop.y > height + 20) droplets.splice(i, 1);
-    }
-    requestAnimationFrame(animate);
-}
-        // --- 1. 哈气音频检测 ---
         async function startAudioDetection() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -161,61 +135,42 @@ function animate() {
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
                 function detect() {
-                    if (hasFogged) return; // 已经起雾就停止检测，节省性能
-
+                    if (hasFogged) return;
                     analyser.getByteFrequencyData(dataArray);
                     let sum = 0;
-                    // 计算中低频段的平均音量（哈气的声音特征）
                     for (let i = 0; i < dataArray.length / 2; i++) sum += dataArray[i];
                     let average = sum / (dataArray.length / 2);
-
-                    // 【阈值】如果音量持续超过这个值，认为是在哈气
-                    // 如果太灵敏或不灵敏，可以调整这个 50
                     if (average > 50) {
-                        fillFog(); // 触发起雾！
+                        fillFog();
                     } else {
                         requestAnimationFrame(detect);
                     }
                 }
                 detect();
             } catch (e) {
-                alert("无法访问麦克风，请确保已授权。");
-                console.error(e);
+                alert("请允许麦克风权限以开启哈气感应。");
             }
         }
 
-        // --- 事件监听 ---
-        function startDrawing(e) {
-            isDrawing = true;
-            const pos = getPos(e);
-            lastX = pos.x; lastY = pos.y;
-        }
-        function move(e) {
-            if (!isDrawing) return;
-            const pos = getPos(e);
-            wipe(pos.x, pos.y);
-        }
         function getPos(e) {
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             return { x: clientX, y: clientY };
         }
 
-        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDrawing(e); }, { passive: false });
-        window.addEventListener('touchmove', (e) => { e.preventDefault(); move(e); }, { passive: false });
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); isDrawing = true; const p = getPos(e); lastX = p.x; lastY = p.y; }, { passive: false });
+        window.addEventListener('touchmove', (e) => { e.preventDefault(); if(isDrawing) wipe(getPos(e).x, getPos(e).y); }, { passive: false });
         window.addEventListener('touchend', () => isDrawing = false);
-        canvas.addEventListener('mousedown', startDrawing);
-        window.addEventListener('mousemove', move);
+        canvas.addEventListener('mousedown', (e) => { isDrawing = true; const p = getPos(e); lastX = p.x; lastY = p.y; });
+        window.addEventListener('mousemove', (e) => { if(isDrawing) wipe(getPos(e).x, getPos(e).y); });
         window.addEventListener('mouseup', () => isDrawing = false);
         window.addEventListener('resize', initCanvas);
 
-        // 点击按钮启动
         document.getElementById('startBtn').addEventListener('click', () => {
             document.getElementById('startScreen').style.display = 'none';
-            startAudioDetection();
             initCanvas();
+            startAudioDetection();
         });
-
     </script>
 </body>
 </html>
